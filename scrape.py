@@ -1,12 +1,42 @@
+import os
+from datetime import datetime
 import csv
 import requests
 from bs4 import BeautifulSoup
+from urllib.parse import parse_qs, urlparse
+
+os.makedirs("scrapes", exist_ok=True)
+
+timestamp = datetime.now().strftime("%Y-%m-%dT%H%M%S%z")
+filename = f"scrapes/{timestamp}.csv"
+
+print(f"Scraping to {filename}")
+
+print("Getting page index...", end='')
+
+# Get page 0
+url = "https://re-publica.com/de/sessions"
+response = requests.get(url)
+response.raise_for_status()
+
+# Parse the HTML content
+soup = BeautifulSoup(response.content, "html.parser")
+
+# Find the pagination element
+pagination = soup.find("nav", class_="pager layout--content-medium")
+
+# Find the last page number
+last_page_elem = pagination.find("li", class_="pager__item--last")
+last_page_url = last_page_elem.find("a")["href"]
+last_page_number = parse_qs(urlparse(last_page_url).query)["page"][0]
+last_page = int(last_page_number)
+
+print(f" last page is {last_page}")
 
 base_url = "https://re-publica.com/de/sessions?page="
-last_page = 30
 
 # Open a CSV file for writing
-with open("session_data.csv", "w", newline="") as csvfile:
+with open(filename, "w", newline="", encoding="utf-8") as csvfile:
     writer = csv.writer(csvfile)
     
     # Write the header row
