@@ -25,13 +25,13 @@ with open("session_data.csv", "w", newline="") as csvfile:
 
     for page in range(last_page + 1):
         url = base_url + str(page)
-        print(f"Fetching page {page} from {url} ")
+        print(f"Fetching page {page} from {url} ", end="")
         response = requests.get(url)
         soup = BeautifulSoup(response.content, "html.parser")
         session_articles = soup.find_all("article")
 
         for article in session_articles:
-            print(".")
+            print(".", end='')
             # Extract session data from the article tag
             session_title_elem = article.find("h2", class_="node__title")
             session_title = session_title_elem.text.strip() if session_title_elem else ""
@@ -75,4 +75,4 @@ with open("session_data.csv", "w", newline="") as csvfile:
                 session_translation
             ])
 
-            print("\n")
+        print("")
