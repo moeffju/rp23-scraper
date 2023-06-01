@@ -15,7 +15,8 @@ LANGUAGE = "de"
 DATA_URL = f"{BASE_URL}/{LANGUAGE}/sessions"
 FIRST_DAY = "2023-06-05"
 LAST_DAY = "2023-06-07"
-TZ = tz.gettz("Europe/Berlin")
+TZ_NAME = "Europe/Berlin"
+TZ = tz.gettz(TZ_NAME)
 
 
 def get_page_count():
@@ -64,9 +65,13 @@ def scrape_republica_page(page):
             session_date_start = datetime.fromisoformat(f"{FIRST_DAY}T06:00:00Z").astimezone(tz=TZ)
             session_date_end = datetime.fromisoformat(f"{LAST_DAY}T16:00:00Z").astimezone(tz=TZ)
         session_format = article.find("div", class_="field--name-field-format").text.strip()
-        session_language = article.find("div", class_="field--name-field-language").text.strip()
+        session_language = article.find("div", class_="field--name-field-language").text.strip()[:2].lower()
         session_translation_element = article.find("div", class_="field--name-field-translation")
-        session_translation = session_translation_element.text.strip() if session_translation_element else False
+        session_translation = session_translation_element.text.strip() != "" if session_translation_element else False
+
+        session_duration = session_date_end - session_date_start
+        session_duration_hours, _seconds = divmod(session_duration.seconds, 3600)
+        session_duration_minutes = _seconds // 60
 
         session_data = {
             "url": f"{BASE_URL}{session_url}",
@@ -77,7 +82,7 @@ def scrape_republica_page(page):
             "end_datetime": session_date_end,
             "end_date": session_date_end.strftime("%Y-%m-%d"),
             "end_time": session_date_end.strftime("%H:%M"),
-            "duration": str(session_date_end - session_date_start),
+            "duration": f"{session_duration_hours}:{session_duration_minutes}",
             "room": session_room,
             "slug": generate_slug(session_title),
             "title": session_title,
@@ -117,12 +122,13 @@ def save_csv(data, output_file):
 
 def save_json(data, output_file):
     with open(output_file, 'w') as file:
-        json.dump(data, file, indent=4)
+        json.dump(data, file, indent=4, default=str)
 
 
 def save_json_frab(data, output_file):
+    # see https://c3voc.de/schedule/schema.json
     schedule = {
-        "version": "",
+        "version": output_file.split('/')[1].split('.')[0],
         "base_url": f"{BASE_URL}/",
         "conference": {
             "acronym": "rp23",
@@ -130,7 +136,8 @@ def save_json_frab(data, output_file):
             "start": data[0]["start_date"],
             "end": data[-1]["end_date"],
             "daysCount": 0,  # Using the number of scraped days
-            "timeslot_duration": "00:10",  # Placeholder for timeslot duration
+            "timeslot_duration": "00:15",  # Placeholder for timeslot duration
+            "time_zone_name": TZ_NAME,
             "days": []
         }
     }
@@ -146,17 +153,22 @@ def save_json_frab(data, output_file):
         for room, room_data in rooms_data.items():
             room_sessions = []
             for session in room_data:
-                session["start"] = session.pop("start_datetime").isoformat()
-                session.pop("start_date")
-                session.pop("start_time")
-                session.pop("end_datetime")
-                session.pop("end_date")
-                session.pop("end_time")
-                session["do_not_record"] = False
-                session["links"] = []
-                session["attachments"] = []
-                session["recording_license"] = "All rights reserved"
-                room_sessions.append(session)
+                row = session.copy()
+                row["start"] = row.pop("start_datetime").isoformat()
+                row["guid"] = row["url"]
+                row["logo"] = ""
+                row.pop("start_date")
+                row.pop("start_time")
+                row.pop("end_datetime")
+                row.pop("end_date")
+                row.pop("end_time")
+                row.pop("translation")
+                row["do_not_record"] = False
+                row["answers"] = []
+                row["links"] = []
+                row["attachments"] = []
+                row["recording_license"] = "Unknown"
+                room_sessions.append(row)
             rooms[room] = room_sessions
 
         day_data = {
@@ -211,8 +223,9 @@ if __name__ == "__main__":
 
     scraped_data = []
     for page in range(last_page + 1):
-        print(f"Page {page+1}/{last_page+1}")
+        print(f"\rPage {page+1}/{last_page+1}", end="")
         scraped_data.extend(scrape_republica_page(page))
+    print("\r", end="")
 
     if args.frab:
         save_json_frab(scraped_data, f"{filename}-frab.json")
