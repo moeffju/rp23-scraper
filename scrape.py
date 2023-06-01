@@ -76,7 +76,7 @@ def scrape_republica_schedule_for_date(date):
         track_element = right_element.find("div", class_="track")
         session_track = track_element.find("a").text.strip()
 
-        session_is_partner = "session-has-partner" in session_element.get("class", [])
+        is_partner_session = session_element.find("span", class_="session-has-partner") is not None
 
         session_data = {
             "id": session_id,
@@ -96,9 +96,9 @@ def scrape_republica_schedule_for_date(date):
             "language": session_language[:2].lower(),
             "abstract": shorten_description(session_description),
             "description": session_description,
-            "translation": (stage in ["Stage 1", "Stage 2"] and not session_is_partner),
+            "translation": (stage in ["Stage 1", "Stage 2"] and not is_partner_session),
             "persons": session_speakers,
-            "is_partner_session": session_is_partner
+            "is_partner_session": is_partner_session
         }
 
         scraped_data.append(session_data)
