@@ -214,7 +214,7 @@ def group_data_by_room(data):
 
 
 def shorten_description(description, max_sentence_length=1, max_word_count=20):
-    sentences = re.split(r'[.!?]\s+', description)
+    sentences = re.split(r'[.:!?]\s+', description)
     abstract = sentences[0]
     if len(sentences) > max_sentence_length:
         abstract = ' '.join(sentences[:max_sentence_length])
