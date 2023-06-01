@@ -53,7 +53,7 @@ def scrape_republica_page(page):
             }
             for speaker in article.find("p", class_="big-speaker-list").find_all("a")
         ]
-        session_info = article.find("div", class_="field--name-field-teaser").find("div", class_="field__item").text.strip()
+        session_description = article.find("div", class_="field--name-field-teaser").find("div", class_="field__item").text.strip()
         session_tag = article.find("div", class_="field--name-field-tag").find("a").text.strip()
         session_room_element = article.find("div", class_="field--name-field-room")
         session_room = session_room_element.text.strip() if session_room_element else ""
@@ -73,6 +73,8 @@ def scrape_republica_page(page):
         session_duration_hours, _seconds = divmod(session_duration.seconds, 3600)
         session_duration_minutes = _seconds // 60
 
+        is_partner_session = article.find("span", class_="session-has-partner") is not None
+
         session_data = {
             "url": f"{BASE_URL}{session_url}",
             "id": int(session_id),
@@ -82,16 +84,18 @@ def scrape_republica_page(page):
             "end_datetime": session_date_end,
             "end_date": session_date_end.strftime("%Y-%m-%d"),
             "end_time": session_date_end.strftime("%H:%M"),
-            "duration": f"{session_duration_hours}:{session_duration_minutes}",
+            "duration": f"{session_duration_hours}:{session_duration_minutes:02}",
             "room": session_room,
             "slug": generate_slug(session_title),
             "title": session_title,
             "track": session_tag,
             "type": session_format,
             "language": session_language,
-            "abstract": session_info,
-            "description": session_info,
+            "abstract": shorten_description(session_description),
+            "description": session_description,
             "translation": session_translation,
+            "translation_derived": (session_room in ["Stage 1", "Stage 2"] and not is_partner_session),
+            "is_partner_session": is_partner_session,
             "persons": session_speakers,
         }
         data.append(session_data)
@@ -107,16 +111,15 @@ def generate_slug(title):
 
 
 def save_csv(data, output_file):
-    keys = [x for x in list(data[0].keys()) if x not in ["persons", "id"]] + ["speakers"]
+    keys = [x for x in list(data[0].keys()) if x not in ["persons"]] + ["speakers"]
     with open(output_file, 'w', newline='') as file:
         writer = csv.DictWriter(file, fieldnames=keys)
         writer.writeheader()
         for session in data:
             row = session.copy()
             row["speakers"] = ", ".join(person["public_name"] for person in session.get("persons", []))
-            row["translation"] = "Yes" if session.get("translation", False) else "No"
+            row["translation"] = session.get("translation", False)
             row.pop("persons", None)
-            row.pop("id", None)
             writer.writerow(row)
 
 
@@ -162,7 +165,6 @@ def save_json_frab(data, output_file):
                 row.pop("end_datetime")
                 row.pop("end_date")
                 row.pop("end_time")
-                row.pop("translation")
                 row["do_not_record"] = False
                 row["answers"] = []
                 row["links"] = []
@@ -204,6 +206,17 @@ def group_data_by_room(data):
             room_groups[room] = []
         room_groups[room].append(session)
     return room_groups
+
+
+def shorten_description(description, max_sentence_length=1, max_word_count=20):
+    sentences = re.split(r'[.:!?]\s+', description)
+    abstract = sentences[0]
+    if len(sentences) > max_sentence_length:
+        abstract = ' '.join(sentences[:max_sentence_length])
+    if len(abstract.split()) > max_word_count:
+        abstract = ' '.join(abstract.split()[:max_word_count]) + '...'
+
+    return abstract
 
 
 if __name__ == "__main__":
