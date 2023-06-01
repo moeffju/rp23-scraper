@@ -1,108 +1,225 @@
-import os
-from datetime import datetime
+import argparse
 import csv
-import requests
-from bs4 import BeautifulSoup
+import json
+import os
+import re
+from datetime import datetime, timedelta
 from urllib.parse import parse_qs, urlparse
 
-os.makedirs("scrapes", exist_ok=True)
+import requests
+from bs4 import BeautifulSoup
+from dateutil import tz
 
-timestamp = datetime.now().strftime("%Y-%m-%dT%H%M%S%z")
-filename = f"scrapes/{timestamp}.csv"
+BASE_URL = "https://re-publica.com"
+LANGUAGE = "de"
+DATA_URL = f"{BASE_URL}/{LANGUAGE}/sessions"
+FIRST_DAY = "2023-06-05"
+LAST_DAY = "2023-06-07"
+TZ = tz.gettz("Europe/Berlin")
 
-print(f"Scraping to {filename}")
 
-print("Getting page index...", end='')
+def get_page_count():
+    response = requests.get(DATA_URL)
+    response.raise_for_status()
 
-# Get page 0
-url = "https://re-publica.com/de/sessions"
-response = requests.get(url)
-response.raise_for_status()
+    soup = BeautifulSoup(response.content, "html.parser")
 
-# Parse the HTML content
-soup = BeautifulSoup(response.content, "html.parser")
+    pagination = soup.find("nav", class_="pager layout--content-medium")
+    last_page_elem = pagination.find("li", class_="pager__item--last")
+    last_page_url = last_page_elem.find("a")["href"]
+    last_page_number = parse_qs(urlparse(last_page_url).query)["page"][0]
+    last_page = int(last_page_number)
+    return last_page
 
-# Find the pagination element
-pagination = soup.find("nav", class_="pager layout--content-medium")
 
-# Find the last page number
-last_page_elem = pagination.find("li", class_="pager__item--last")
-last_page_url = last_page_elem.find("a")["href"]
-last_page_number = parse_qs(urlparse(last_page_url).query)["page"][0]
-last_page = int(last_page_number)
+def scrape_republica_page(page):
+    url = f"{DATA_URL}?page={page}"
+    response = requests.get(url)
+    soup = BeautifulSoup(response.text, "html.parser")
 
-print(f" last page is {last_page}")
+    articles = soup.find_all("article", class_="node--type-session-conference")
+    data = []
+    for article in articles:
+        session_title_element = article.find("h2", class_="node__title")
+        session_title = session_title_element.text.strip()
+        session_url = session_title_element.find("a").get("href")
+        # session_id = re.search(r"\d+", session_url).group() if session_url else ""
+        session_id = 0
+        session_speakers = [
+            {
+                "id": int(re.search(r"\d+", speaker.get("href")).group()),
+                "public_name": speaker.text.strip()
+            }
+            for speaker in article.find("p", class_="big-speaker-list").find_all("a")
+        ]
+        session_info = article.find("div", class_="field--name-field-teaser").find("div", class_="field__item").text.strip()
+        session_tag = article.find("div", class_="field--name-field-tag").find("a").text.strip()
+        session_room_element = article.find("div", class_="field--name-field-room")
+        session_room = session_room_element.text.strip() if session_room_element else ""
+        session_date_element = article.find("div", class_="field--name-field-date")
+        if session_date_element:
+            session_date_start = datetime.fromisoformat(session_date_element.find_all("time")[0].get("datetime")).astimezone(tz=TZ)
+            session_date_end = datetime.fromisoformat(session_date_element.find_all("time")[1].get("datetime")).astimezone(tz=TZ)
+        else:
+            session_date_start = datetime.fromisoformat(f"{FIRST_DAY}T06:00:00Z").astimezone(tz=TZ)
+            session_date_end = datetime.fromisoformat(f"{LAST_DAY}T16:00:00Z").astimezone(tz=TZ)
+        session_format = article.find("div", class_="field--name-field-format").text.strip()
+        session_language = article.find("div", class_="field--name-field-language").text.strip()
+        session_translation_element = article.find("div", class_="field--name-field-translation")
+        session_translation = session_translation_element.text.strip() if session_translation_element else False
 
-base_url = "https://re-publica.com/de/sessions?page="
+        session_data = {
+            "url": f"{BASE_URL}{session_url}",
+            "id": int(session_id),
+            "start_datetime": session_date_start,
+            "start_date": session_date_start.strftime("%Y-%m-%d"),
+            "start_time": session_date_start.strftime("%H:%M"),
+            "end_datetime": session_date_end,
+            "end_date": session_date_end.strftime("%Y-%m-%d"),
+            "end_time": session_date_end.strftime("%H:%M"),
+            "duration": str(session_date_end - session_date_start),
+            "room": session_room,
+            "slug": generate_slug(session_title),
+            "title": session_title,
+            "track": session_tag,
+            "type": session_format,
+            "language": session_language,
+            "abstract": session_info,
+            "description": session_info,
+            "translation": session_translation,
+            "persons": session_speakers,
+        }
+        data.append(session_data)
 
-# Open a CSV file for writing
-with open(filename, "w", newline="", encoding="utf-8") as csvfile:
-    writer = csv.writer(csvfile)
-    
-    # Write the header row
-    writer.writerow([
-        "Session Title",
-        "Speakers",
-        "Info",
-        "Tags",
-        "Room",
-        "Start",
-        "End",
-        "Format",
-        "Language",
-        "Translation"
-    ])
+    return data
 
+
+def generate_slug(title):
+    slug = re.sub(r"[^\w\d]+", "-", title)
+    slug = re.sub(r"-+", "-", slug)  # Replace consecutive hyphens with a single hyphen
+    slug = slug.strip("-")  # Remove leading and trailing hyphens
+    return slug.lower()
+
+
+def save_csv(data, output_file):
+    keys = [x for x in list(data[0].keys()) if x not in ["persons", "id"]] + ["speakers"]
+    with open(output_file, 'w', newline='') as file:
+        writer = csv.DictWriter(file, fieldnames=keys)
+        writer.writeheader()
+        for session in data:
+            row = session.copy()
+            row["speakers"] = ", ".join(person["public_name"] for person in session.get("persons", []))
+            row["translation"] = "Yes" if session.get("translation", False) else "No"
+            row.pop("persons", None)
+            row.pop("id", None)
+            writer.writerow(row)
+
+
+def save_json(data, output_file):
+    with open(output_file, 'w') as file:
+        json.dump(data, file, indent=4)
+
+
+def save_json_frab(data, output_file):
+    schedule = {
+        "version": "",
+        "base_url": f"{BASE_URL}/",
+        "conference": {
+            "acronym": "rp23",
+            "title": "re:publica 2023",
+            "start": data[0]["start_date"],
+            "end": data[-1]["end_date"],
+            "daysCount": 0,  # Using the number of scraped days
+            "timeslot_duration": "00:10",  # Placeholder for timeslot duration
+            "days": []
+        }
+    }
+
+    day_groups = group_data_by_day(data)
+    schedule["conference"]["daysCount"] = len(day_groups)
+
+    for index, day_group in enumerate(day_groups, start=1):
+        day_start = min(session["start_datetime"] for session in day_group)
+        day_end = max(datetime.strptime(session["end_time"], "%H:%M").astimezone(tz=TZ).time() for session in day_group)
+        rooms_data = group_data_by_room(day_group)
+        rooms = {}
+        for room, room_data in rooms_data.items():
+            room_sessions = []
+            for session in room_data:
+                session["start"] = session.pop("start_datetime").isoformat()
+                session.pop("start_date")
+                session.pop("start_time")
+                session.pop("end_datetime")
+                session.pop("end_date")
+                session.pop("end_time")
+                session["do_not_record"] = False
+                session["links"] = []
+                session["attachments"] = []
+                session["recording_license"] = "All rights reserved"
+                room_sessions.append(session)
+            rooms[room] = room_sessions
+
+        day_data = {
+            "index": index,
+            "date": day_start.strftime("%Y-%m-%d"),
+            "day_start": day_start.strftime("%H:%M"),
+            "day_end": day_end.strftime("%H:%M"),
+            "rooms": rooms
+        }
+        schedule["conference"]["days"].append(day_data)
+
+    with open(output_file, "w") as file:
+        json.dump(schedule, file, indent=4)
+
+
+def group_data_by_day(data):
+    day_groups = []
+    current_day = None
+    for session in data:
+        session_day = session["start_date"]
+        if session_day != current_day:
+            current_day = session_day
+            day_groups.append([])
+        day_groups[-1].append(session)
+    return day_groups
+
+
+def group_data_by_room(data):
+    room_groups = {}
+    for session in data:
+        room = session["room"]
+        if room not in room_groups:
+            room_groups[room] = []
+        room_groups[room].append(session)
+    return room_groups
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="re:publica Scraper")
+    parser.add_argument("--csv", action="store_true", help="Output data in CSV format (default)")
+    parser.add_argument("--json", action="store_true", help="Output data in JSON format")
+    parser.add_argument("--frab", action="store_true", help="Output data in Frab schedule format")
+    args = parser.parse_args()
+
+    os.makedirs("scrapes", exist_ok=True)
+
+    timestamp = datetime.now(TZ).strftime("%Y-%m-%dT%H%M%S%z")
+    filename = f"scrapes/{timestamp}"
+
+    last_page = get_page_count()
+    print(f"Scraping {last_page+1} pages from {DATA_URL}...")
+
+    scraped_data = []
     for page in range(last_page + 1):
-        url = base_url + str(page)
-        print(f"Fetching page {page} from {url} ", end="")
-        response = requests.get(url)
-        soup = BeautifulSoup(response.content, "html.parser")
-        session_articles = soup.find_all("article")
+        print(f"Page {page+1}/{last_page+1}")
+        scraped_data.extend(scrape_republica_page(page))
 
-        for article in session_articles:
-            print(".", end='')
-            # Extract session data from the article tag
-            session_title_elem = article.find("h2", class_="node__title")
-            session_title = session_title_elem.text.strip() if session_title_elem else ""
-
-            session_speakers_elem = article.select("p.big-speaker-list a")
-            session_speakers = [a.text for a in session_speakers_elem]
-
-            session_info_elem = article.find("div", class_="field__item")
-            session_info = session_info_elem.text.strip() if session_info_elem else ""
-
-            session_tags_elem = article.select("div.field--name-field-tag-additional a")
-            session_tags = [a.text for a in session_tags_elem]
-
-            session_room_elem = article.find("div", class_="field--name-field-room")
-            session_room = session_room_elem.text.strip() if session_room_elem else ""
-
-            session_dates = article.select("div.field--name-field-date time")
-            session_start = session_dates[0]["datetime"] if session_dates else ""
-            session_end = session_dates[1]["datetime"] if len(session_dates) > 1 else ""
-
-            session_format_elem = article.find("div", class_="field--name-field-format")
-            session_format = session_format_elem.text.strip() if session_format_elem else ""
-
-            session_language_elem = article.find("div", class_="field--name-field-language")
-            session_language = session_language_elem.text.strip() if session_language_elem else ""
-
-            session_translation_elem = article.find("div", class_="field--name-field-translation")
-            session_translation = session_translation_elem.text.strip() if session_translation_elem else ""
-
-            # Write session data to the CSV file
-            writer.writerow([
-                session_title,
-                ", ".join(session_speakers),
-                session_info,
-                ", ".join(session_tags),
-                session_room,
-                session_start,
-                session_end,
-                session_format,
-                session_language,
-                session_translation
-            ])
-
-        print("")
+    if args.frab:
+        save_json_frab(scraped_data, f"{filename}-frab.json")
+        print(f"Saved as {filename}-frab.json")
+    if args.json:
+        save_json(scraped_data, f"{filename}.json")
+        print(f"Saved as {filename}.json")
+    if args.csv or (not args.frab and not args.json):
+        save_csv(scraped_data, f"{filename}.csv")
+        print(f"Saved as {filename}.csv")
