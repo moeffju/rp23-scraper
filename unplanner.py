@@ -9,9 +9,9 @@ def filter_csv(csv_file, names):
 
     # Define the column ranges for each stage
     stage_ranges = {
-        'Stage 1': (1, 11),
-        'Stage 2': (11, 21),
-        'Standby': (31, 33)
+        'Stage 1': (3, 13),
+        'Stage 2': (13, 23),
+        'Standby': (1, 2)
     }
 
     with open(csv_file, 'r', encoding='utf-8') as file:
@@ -33,7 +33,7 @@ def filter_csv(csv_file, names):
             matching_columns = []
 
             # Iterate over the INT_* columns
-            for j in range(9, 32):
+            for j in range(len(row)):
                 cell_value = row[j]
                 if any(name.lower() in cell_value.lower() for name in names):
                     matching_stage = determine_stage(j, stage_ranges)
