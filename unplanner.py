@@ -16,15 +16,11 @@ def filter_csv(csv_file, names):
 
     with open(csv_file, 'r', encoding='utf-8') as file:
         reader = csv.reader(file)
-        header = next(reader)
         rows = list(reader)
 
-        # Find the header rows
-        header_rows = []
+        # Skip the header rows
         for i, row in enumerate(rows):
             if row[0] == 'date':
-                header_rows.append(row)
-            else:
                 break
 
         # Iterate over the data rows
@@ -43,9 +39,6 @@ def filter_csv(csv_file, names):
             if matching_stage:
                 filtered_row = [row[0], matching_stage] + matching_columns
                 filtered_rows.append(filtered_row)
-
-    # Include the header rows in the output
-    filtered_rows = header_rows + filtered_rows
 
     return filtered_rows
 
@@ -67,13 +60,16 @@ def output_list(filtered_rows):
     for row in filtered_rows:
         date = row[0]
         stage = row[1]
-        time = row[3]
-        duration = row[4]
-        title = row[5]
-        speakers = row[6]
-        language = row[7]
-        formatted_output = f"{date} - {stage} - {time} ({duration}) - [{language}] {title} - {speakers}"
-        print(formatted_output)
+        if stage == "Standby":
+            print(f"{date} - {stage}")
+        else:
+            time = row[3]
+            duration = row[4]
+            title = row[5]
+            speakers = row[6]
+            language = row[7]
+            formatted_output = f"{date} - {stage} - {time} ({duration}) - [{language}] {title} - {speakers}"
+            print(formatted_output)
 
 
 if len(sys.argv) < 3:
