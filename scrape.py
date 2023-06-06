@@ -48,6 +48,7 @@ def scrape_republica_page(page):
         session_url = session_title_element.find("a").get("href")
         # session_id = re.search(r"\d+", session_url).group() if session_url else ""
         session_id = 0
+        session_cancelled = "rp-cancelled" in article["class"]
         session_speakers = [
             {
                 "id": int(re.search(r"\d+", speaker.get("href")).group()),
@@ -90,6 +91,7 @@ def scrape_republica_page(page):
             "room": session_room,
             "slug": generate_slug(session_title),
             "title": session_title,
+            "persons": session_speakers,
             "track": session_tag,
             "type": session_format,
             "language": session_language,
@@ -98,7 +100,7 @@ def scrape_republica_page(page):
             "translation": session_translation,
             "translation_derived": (session_room in ["Stage 1", "Stage 2"] and not is_partner_session),
             "is_partner_session": is_partner_session,
-            "persons": session_speakers,
+            "is_cancelled": session_cancelled,
         }
         data.append(session_data)
 
