@@ -16,7 +16,7 @@ with open(filename, 'r', encoding='utf-8') as file:
     records = list(reader)
 
 # Filter records
-filtered_records = list(filter(lambda record: record["room"] in ["Stage 1", "Stage 2"] and record["translation"] == "True" and record["is_partner_session"] == "False", records))
+filtered_records = list(filter(lambda record: record["room"] in ["Stage 1", "Stage 2"] and record["is_partner_session"] == "False" and record.get("is_cancelled", "False") == "False", records))
 
 # Get list of rooms in filtered set
 rooms = sorted(set(record["room"] for record in filtered_records))
@@ -41,7 +41,7 @@ for record in sorted_records:
         print("ERROR: Multiple sessions for same starting time same room!", file=sys.stderr)
         print(f"Time slot: {start_date} {start_time} in room {room}", file=sys.stderr)
         print(f"Existing data:  {repr(grouped_records[start_date][start_time][room])}", file=sys.stderr)
-        print(f"Colliding data: {repr(record)}")
+        print(f"Colliding data: {repr(record)}", file=sys.stderr)
         pass
 
 # Generate and print the header
